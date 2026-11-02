@@ -1,0 +1,71 @@
+<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Bot de trading · Paper 1H</title>
+<style>
+:root{--bg:#070b12;--p:#0d1420;--b:#1c2a3d;--t:#c9d6e6;--m:#6b7f99;--g:#2ee59d;--r:#ff4d6a;--a:#4da3ff}
+*{box-sizing:border-box}body{margin:0 auto;background:var(--bg);color:var(--t);font:12px/1.45 ui-monospace,Menlo,Consolas,monospace;padding:10px;max-width:980px}
+.top{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:8px}.logo{font-weight:700;letter-spacing:.12em;color:var(--a)}
+.tag{padding:2px 8px;border-radius:4px;border:1px solid var(--g);color:var(--g);font-size:11px}.tag.off{border-color:var(--r);color:var(--r)}
+.st{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin-bottom:8px}
+.c{background:var(--p);border:1px solid var(--b);border-radius:8px;padding:10px;margin-bottom:8px}
+.k{color:var(--m);font-size:10px;text-transform:uppercase;letter-spacing:.08em}.v{font-size:19px;font-weight:700;margin-top:2px}
+.g{color:var(--g)}.r{color:var(--r)}h3{margin:0 0 8px;font-size:11px;color:var(--m);text-transform:uppercase;letter-spacing:.1em}
+.flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(135px,1fr));gap:6px}.fb{border:1px solid var(--b);border-radius:6px;padding:8px;background:#0a111b}
+.fb b{display:block;color:var(--a);margin-bottom:2px}.fb small{color:var(--m)}
+.w{overflow-x:auto}table{border-collapse:collapse;width:100%;min-width:520px}td,th{padding:5px 6px;border-bottom:1px solid var(--b);text-align:right;white-space:nowrap}th{color:var(--m);font-weight:400}td:first-child,th:first-child{text-align:left}
+.tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px}button{background:var(--p);color:var(--t);border:1px solid var(--b);border-radius:6px;padding:5px 10px;font:inherit;cursor:pointer}button.on{border-color:var(--a);color:var(--a)}
+canvas{width:100%;height:170px;display:block}.big{display:grid;grid-template-columns:1fr 1fr;gap:8px}.big .v{font-size:26px}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}small.n{color:var(--m);display:block;margin-top:8px}
+</style></head><body>
+<div class="top"><span class="logo">● TALOS · PAPER 1H</span><span class="tag" id="tag">conectando</span><span id="msg" style="color:var(--m)"></span><span id="rs" style="margin-left:auto;color:var(--m)"></span></div>
+<div class="st" id="st"></div>
+<div class="c"><h3>Cómo fluye la información</h3><div class="flow" id="flow"></div></div>
+<div class="c"><h3>Mercado en vivo</h3><div class="w"><table id="mk"></table></div></div>
+<div class="c"><h3>Posiciones abiertas</h3><div class="w"><table id="op"></table></div></div>
+<div class="c"><h3>Resultados día a día</h3><div class="tabs" id="tabs"></div><div class="st" id="ds"></div><canvas id="cv"></canvas><div class="w"><table id="tr"></table></div></div>
+<div class="c"><h3>Comparación con el bot de 15 minutos</h3><div id="cm" style="color:var(--m)">Cargando…</div></div>
+<div class="big"><div class="c"><div class="k">Rentabilidad del bot</div><div class="v" id="rb"></div></div><div class="c"><div class="k">Subida de Bitcoin</div><div class="v" id="rbtc"></div></div></div>
+<small class="n">Dinero simulado. Bot de 1 hora: 16 monedas, stops y objetivos revisados con velas de 1 minuto. Corre en GitHub las 24 horas. Comisión 0,05% por lado y deslizamiento 0,02% simulados. Datos: Binance (públicos). No es asesoramiento financiero.</small>
+<script>
+const SYMS=['BTC','ETH','SOL','XRP','SUI','BNB','DOGE','ADA','LINK','AVAX','LTC','DOT','TRX','NEAR','ATOM','UNI'],K='bot_paper_v1',DAY=864e5,FEE=.0005,SLIP=.0002;
+function fresh(){return{t0:Date.now(),cap:1000,bal:1000,pos:[],tr:[],eq:[],btc0:null,btcN:null,cool:{}}}
+let S=fresh();
+let ST={rows:[],ok:0},sel=0;const $=id=>document.getElementById(id);
+const save=()=>{try{localStorage.setItem(K,JSON.stringify(S))}catch(e){}};
+const f=(n,d=2)=>n.toLocaleString('es-AR',{minimumFractionDigits:d,maximumFractionDigits:d});
+const sg=(n,d=2)=>(n>=0?'+':'')+f(n,d),cl=n=>n>=0?'g':'r';
+const ema=(a,n)=>{const k=2/(n+1);let e=a[0];return a.map(v=>e=v*k+e*(1-k))};
+function rsi(c,n=14){let g=0,l=0;for(let i=c.length-n;i<c.length;i++){const d=c[i]-c[i-1];d>0?g+=d:l-=d}return l==0?100:100-100/(1+g/l)}
+function atr(h,l,c,n=14){let s=0;for(let i=c.length-n;i<c.length;i++)s+=Math.max(h[i]-l[i],Math.abs(h[i]-c[i-1]),Math.abs(l[i]-c[i-1]));return s/n}
+async function get(s){for(const h of['https://api.binance.com','https://data-api.binance.vision']){try{const r=await fetch(h+'/api/v3/klines?symbol='+s+'USDT&interval=15m&limit=120');if(r.ok)return await r.json()}catch(e){}}return null}
+const unreal=px=>S.pos.reduce((a,q)=>a+q.side*((px[q.s]||q.last||q.e)-q.e)*q.q,0);
+const dayStartEq=d=>{const t=S.t0+(d-1)*DAY;let e=S.cap;for(const x of S.eq){if(x[0]<t)e=x[1];else break}return e};
+function close(q,p,why,now){const pnl=q.side*(p-q.e)*q.q-FEE*2*q.e*q.q;S.bal+=pnl;S.tr.push({s:q.s,side:q.side,t0:q.t,t1:now,pnl,why});S.cool[q.s]=now;S.pos=S.pos.filter(x=>x!==q)}
+async function tick(){try{const r=await fetch('state.json?t='+Date.now());if(!r.ok)throw 0;S=Object.assign(fresh(),await r.json());ST={rows:S.rows||[],ok:S.ok||0,block:S.block,err:!S.ok};$('rs').textContent='Actualizado '+new Date(S.upd).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})}catch(e){ST={rows:[],ok:0,err:1}}render()}
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function renderNews(){const N=S.news;if(!N){$('nw').innerHTML='<span style="color:var(--m)">Esperando la primera lectura de noticias…</span>';return}
+const L=['Normal','Cuidado','Peligro'],C=['var(--g)','#f5c542','var(--r)'],A=['Opera normalmente','No abre posiciones nuevas','Cierra todo y no opera'],hm=t=>new Date(t).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});
+const D=N.dir||0,dh=D&&N.dhold>Date.now()?' · hasta '+hm(N.dhold):'',h=N.hold>Date.now()&&N.lvl>0?' · retenido hasta '+hm(N.hold):'';
+$('nw').innerHTML=`<div style="font-size:19px;font-weight:700;color:${C[N.lvl]}"><span class="dot" style="background:${C[N.lvl]}"></span>${L[N.lvl]}</div><div>${A[N.lvl]}${h}</div><div>${D>0?'Viento a favor: no abre shorts nuevos':D<0?'Viento en contra: no abre longs nuevos':'Sin sesgo de noticias'}${dh}</div><div style="color:var(--m);margin:6px 0">${esc(N.motivo)} · lectura: ${esc(N.modo)} · ${N.n} titulares · ${N.t?hm(N.t):'—'}</div>`+(N.heads||[]).map(x=>`<div style="color:var(--m);font-size:11px">• ${esc(x)}</div>`).join('')}
+function render(){
+ const now=Date.now(),px={};ST.rows.forEach(r=>px[r.s]=r.p);const E=S.bal+unreal(px),days=Math.floor((now-S.t0)/DAY)+1;if(!sel||sel>days)sel=days;
+ const wins=S.tr.filter(x=>x.pnl>0).length;
+ $('tag').textContent=ST.err?'sin datos':'activo';$('tag').className='tag'+(ST.err?' off':'');$('msg').textContent=ST.err?'Esperando la primera corrida del bot':(ST.block?'Pausado: límite de pérdida diaria (3%)':(S.news&&S.news.lvl>0?'Freno de noticias activo':'Operando con normalidad'));
+ $('st').innerHTML=[['Balance',f(E)+' $',''],['Resultado',sg(E-S.cap)+' $',cl(E-S.cap)],['Abiertas',S.pos.length+' / 3',''],['Operaciones',S.tr.length,''],['Acierto',S.tr.length?f(wins/S.tr.length*100,0)+'%':'—','']].map(x=>`<div class="c" style="margin:0"><div class="k">${x[0]}</div><div class="v ${x[2]}">${x[1]}</div></div>`).join('');
+ const R=ST.rows;$('flow').innerHTML=[['1 · Datos',`${ST.ok}/${SYMS.length} activos`,'velas de 1 hora'],['2 · Indicadores','Tendencia','Volumen · Volatilidad · RSI'],['3 · Filtro',`${R.filter(x=>x.pass).length} pasan`,'volatilidad y volumen sanos'],['4 · Analista',`${R.filter(x=>x.dec).length} señales`,'por puntaje, sin IA aún'],['5 · Motor de riesgo','1% por operación','stop 1,5 ATR · máx. 3 posiciones'],['6 · Posición',`${S.pos.length} abiertas`,'simuladas']].map(x=>`<div class="fb"><b>${x[0]}</b>${x[1]}<br><small>${x[2]}</small></div>`).join('');
+ $('mk').innerHTML='<tr><th>Activo</th><th>Precio</th><th>Tendencia</th><th>RSI</th><th>Vol.</th><th>Volat.</th><th>Puntaje</th><th>Señal</th></tr>'+R.map(r=>`<tr><td>${r.s}</td><td>${f(r.p,r.p<10?4:2)}</td><td class="${r.tr>0?'g':r.tr<0?'r':''}">${r.tr>0?'alza':r.tr<0?'baja':'lateral'}</td><td>${f(r.r,0)}</td><td>${f(r.vr,1)}x</td><td>${f(r.vp,2)}%</td><td>${f(r.sc,0)}</td><td class="${r.dec>0?'g':r.dec<0?'r':''}">${r.dec>0?'LONG':r.dec<0?'SHORT':r.pass?'espera':'filtrado'}</td></tr>`).join('');
+ $('op').innerHTML=S.pos.length?'<tr><th>Activo</th><th>Lado</th><th>Entrada</th><th>Stop</th><th>Objetivo</th><th>P&amp;L</th></tr>'+S.pos.map(q=>{const p=px[q.s]||q.last,u=q.side*(p-q.e)*q.q;return`<tr><td>${q.s}</td><td class="${q.side>0?'g':'r'}">${q.side>0?'long':'short'}</td><td>${f(q.e,q.e<10?4:2)}</td><td>${f(q.stop,q.e<10?4:2)}</td><td>${f(q.tp,q.e<10?4:2)}</td><td class="${cl(u)}">${sg(u)} $</td></tr>`}).join(''):'<tr><td style="color:var(--m)">Sin posiciones abiertas</td></tr>';
+ $('tabs').innerHTML=Array.from({length:days},(_,i)=>`<button class="${i+1==sel?'on':''}" onclick="sel=${i+1};render()">Día ${i+1}</button>`).join('');
+ const t1=S.t0+(sel-1)*DAY,t2=t1+DAY,trs=S.tr.filter(x=>x.t1>=t1&&x.t1<t2),dp=trs.reduce((a,x)=>a+x.pnl,0),se=dayStartEq(sel);
+ $('ds').innerHTML=[['Resultado del día',sg(dp)+' $',cl(dp)],['Operaciones',trs.length,''],['Balance al cierre',f(sel==days?E:(S.eq.filter(x=>x[0]<t2).pop()||[0,S.cap])[1])+' $',''],['Resultado total',sg(E-S.cap)+' $',cl(E-S.cap)]].map(x=>`<div class="c" style="margin:0"><div class="k">${x[0]}</div><div class="v ${x[2]}">${x[1]}</div></div>`).join('');
+ draw(t1,t2,se);
+ $('tr').innerHTML=trs.length?'<tr><th>Activo</th><th>Lado</th><th>Cierre</th><th>Motivo</th><th>P&amp;L</th></tr>'+trs.slice().reverse().map(x=>`<tr><td>${x.s}</td><td class="${x.side>0?'g':'r'}">${x.side>0?'long':'short'}</td><td>${new Date(x.t1).toLocaleString('es-AR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}</td><td>${x.why}</td><td class="${cl(x.pnl)}">${sg(x.pnl)} $</td></tr>`).join(''):'<tr><td style="color:var(--m)">Sin operaciones cerradas este día</td></tr>';
+ const rb=(E/S.cap-1)*100,bt=S.btc0&&S.btcN?(S.btcN/S.btc0-1)*100:0;
+ $('rb').innerHTML=`<span class="${cl(rb)}">${sg(rb)}%</span> <small style="font-size:11px;color:var(--m)">${sg(E-S.cap)} $</small>`;$('rbtc').innerHTML=`<span class="${cl(bt)}">${sg(bt)}%</span> <small style="font-size:11px;color:var(--m)">desde el inicio</small>`}
+function draw(t1,t2,se){const cv=$('cv'),W=cv.clientWidth,H=170,dp=devicePixelRatio||1;cv.width=W*dp;cv.height=H*dp;const x=cv.getContext('2d');x.scale(dp,dp);x.clearRect(0,0,W,H);
+ const pts=S.eq.filter(p=>p[0]>=t1&&p[0]<t2).map(p=>[p[0],p[1]-se]);if(pts.length<2){x.fillStyle='#6b7f99';x.font='12px monospace';x.fillText('Juntando datos…',10,20);return}
+ const ys=pts.map(p=>p[1]).concat(0),mn=Math.min(...ys),mx=Math.max(...ys),rg=(mx-mn)||1,X=t=>(t-t1)/DAY*(W-10)+5,Y=v=>H-12-(v-mn)/rg*(H-24);
+ x.strokeStyle='#1c2a3d';x.beginPath();x.moveTo(0,Y(0));x.lineTo(W,Y(0));x.stroke();
+ const up=pts[pts.length-1][1]>=0,col=up?'#2ee59d':'#ff4d6a';x.beginPath();x.moveTo(X(pts[0][0]),Y(0));pts.forEach(p=>x.lineTo(X(p[0]),Y(p[1])));x.lineTo(X(pts[pts.length-1][0]),Y(0));x.closePath();x.fillStyle=up?'rgba(46,229,157,.15)':'rgba(255,77,106,.15)';x.fill();
+ x.beginPath();pts.forEach((p,i)=>i?x.lineTo(X(p[0]),Y(p[1])):x.moveTo(X(p[0]),Y(p[1])));x.strokeStyle=col;x.lineWidth=1.5;x.stroke();x.fillStyle='#6b7f99';x.font='10px monospace';x.fillText(sg(mx)+' $',4,10)}
+async function cmp(){try{const r=await fetch('https://econtabledmg-design.github.io/bot-trading/state.json?t='+Date.now());if(!r.ok)throw 0;const o=await r.json(),px={};(o.rows||[]).forEach(x=>px[x.s]=x.p);const u=(o.pos||[]).reduce((a,q)=>a+q.side*((px[q.s]||q.last||q.e)-q.e)*q.q,0),E=o.bal+u,w=(o.tr||[]).filter(x=>x.pnl>0).length,n=(o.tr||[]).length;$('cm').innerHTML=`Bot 15 min: <b class="${cl(E-o.cap)}">${sg(E-o.cap)} $</b> (${sg((E/o.cap-1)*100)}%) · ${n} operaciones · acierto ${n?f(w/n*100,0)+'%':'—'}`}catch(e){$('cm').textContent='No se pudo leer el bot de 15 minutos.'}}
+addEventListener('resize',render);render();const loop=()=>{tick().catch(()=>{ST.err=1;render()});cmp()};loop();setInterval(loop,60000);
+</script></body></html>
